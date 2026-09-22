@@ -8,6 +8,7 @@ import type { CipherResponse, FolderResponse } from '@/lib/protocol/types';
 import { CipherType } from '@/lib/protocol/types';
 import { parseTotp, generateTotp } from '@/lib/crypto/totp';
 import { parseAndDecrypt } from '@/lib/crypto/enc-string';
+import { uriMatches } from '@/lib/autofill/match-uri';
 import EditView from './EditView';
 
 const TYPE_LABEL: Record<number, string> = {
@@ -49,6 +50,7 @@ export default function VaultView(props: { onLock: () => void; onLogout: () => v
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState('');
   const [error, setError] = useState('');
+  const [tabUrl, setTabUrl] = useState('');
   // 路由：列表 / 详情 / 编辑（新建是 edit 无 item）
   const [route, setRoute] = useState<
     { name: 'list' } | { name: 'detail'; item: DecryptedCipher } | { name: 'edit'; item: DecryptedCipher | null }
@@ -75,7 +77,41 @@ export default function VaultView(props: { onLock: () => void; onLogout: () => v
 
   useEffect(() => {
     reload().catch((e) => setError(e instanceof Error ? e.message : String(e)));
+    // 当前标签页 URL（host 权限已够，无需 tabs 权限）
+    browser.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
+      if (tab?.url && /^https?:/.test(tab.url)) setTabUrl(tab.url);
+    });
   }, []);
+
+  /** 当前网站匹配的条目（置顶区，点击即填充） */
+  const tabMatches = useMemo(
+    () =>
+      tabUrl
+        ? items.filter(
+            (i) =>
+              i.type === CipherType.Login &&
+              !i.deletedDate &&
+              i.uris.length > 0 &&
+              uriMatches(i.uris, tabUrl),
+          )
+        : [],
+    [items, tabUrl],
+  );
+
+  const fillToTab = async (item: DecryptedCipher) => {
+    const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) return;
+    try {
+      await browser.tabs.sendMessage(tab.id, {
+        type: 'keycask:fill',
+        item: { id: item.id, name: item.name, username: item.username, password: item.password },
+      });
+      window.close();
+    } catch {
+      // 页面未加载 content script（扩展重载前的旧标签页）：提示刷新
+      setError('当前页面未加载填充脚本，请刷新页面后重试');
+    }
+  };
 
   const doSync = async () => {
     if (syncing) return;
@@ -193,6 +229,46 @@ export default function VaultView(props: { onLock: () => void; onLogout: () => v
       {/* 列表：唯一滚动区 */}
       <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         {error && <p class="m-2 rounded-lg bg-red-50 p-2 text-xs text-red-700">{error}</p>}
+
+        {tabMatches.length > 0 && !query && (
+          <>
+            <p class="bg-gray-50 px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-gray-400">
+              当前网站
+            </p>
+            {tabMatches.map((item) => (
+              <div
+                key={item.id}
+                class="flex w-full items-center gap-3 border-b border-gray-50 px-3 py-2.5 transition hover:bg-blue-50/50"
+              >
+                <button
+                  class="flex min-w-0 flex-1 items-center gap-3 text-left"
+                  title="点击填充到当前页面"
+                  onClick={() => fillToTab(item)}
+                >
+                  <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-semibold text-white">
+                    {item.name[0]?.toUpperCase() ?? '?'}
+                  </span>
+                  <span class="min-w-0 flex-1">
+                    <span class="block truncate font-medium leading-tight">{item.name}</span>
+                    <span class="block truncate text-xs leading-tight text-gray-400">
+                      {item.username ?? ''}
+                    </span>
+                  </span>
+                </button>
+                <button
+                  class="shrink-0 rounded px-2 py-1 text-xs text-gray-400 hover:bg-gray-100"
+                  title="查看详情"
+                  onClick={() => setRoute({ name: 'detail', item })}
+                >
+                  ›
+                </button>
+              </div>
+            ))}
+            <p class="bg-gray-50 px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-gray-400">
+              全部条目
+            </p>
+          </>
+        )}
 
         {filtered.map((item) => (
           <button

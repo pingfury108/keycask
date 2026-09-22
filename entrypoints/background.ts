@@ -1,5 +1,6 @@
 import { serverUrl, accessToken, lastActivity, lockTimeoutMin } from '@/lib/store/settings';
 import { lock, syncVault } from '@/lib/vaultwarden/auth';
+import { getLoginMatches, watchMatchCache } from '@/lib/vaultwarden/matches';
 import { VaultwardenClient } from '@/lib/vaultwarden/client';
 
 const SYNC_ALARM = 'keycask-sync';
@@ -27,6 +28,15 @@ export default defineBackground(() => {
     if (alarm.name === SYNC_ALARM) void onSyncAlarm();
     if (alarm.name === LOCK_ALARM) void onLockAlarm();
   });
+
+  // content script 的匹配请求：只回传与页面域名匹配的条目
+  browser.runtime.onMessage.addListener((msg: { type?: string; url?: string }) => {
+    if (msg.type === 'keycask:get-matches' && msg.url) {
+      return getLoginMatches(msg.url);
+    }
+  });
+
+  watchMatchCache();
 });
 
 /** 自动同步：仅在有会话时执行，失败静默（下次再说） */
