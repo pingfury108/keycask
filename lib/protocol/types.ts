@@ -177,6 +177,6 @@ export interface PolicyResponse {
 export interface ConfigResponse {
   version: string; // ⚠️ 这是 Web Vault 版本，不是服务端版本
   gitHash?: string;
-  server?: { name: string; url: string } | null;
+  server?: { name: string; url: string; version?: string } | null;
   featureStates?: Record<string, unknown>;
 }

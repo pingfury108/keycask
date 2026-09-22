@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { fromB64 } from '@/lib/crypto/encoding';
 import { decryptCiphers, type DecryptedCipher, type FailedCipher } from '@/lib/crypto/decrypt';
-import { userKeyB64, orgKeysB64, vaultCiphersRaw, vaultFoldersRaw } from '@/lib/store/settings';
+import { loadOrgKeys, lock, recordSyncStats, syncVault } from '@/lib/vaultwarden/auth';
+import { trashCipher } from '@/lib/vaultwarden/ciphers';
+import { userKeyB64, vaultCiphersRaw, vaultFoldersRaw, lastSyncAt } from '@/lib/store/settings';
 import type { CipherResponse, FolderResponse } from '@/lib/protocol/types';
 import { CipherType } from '@/lib/protocol/types';
 import { parseTotp, generateTotp } from '@/lib/crypto/totp';
 import { parseAndDecrypt } from '@/lib/crypto/enc-string';
+import EditView from './EditView';
 
 const TYPE_LABEL: Record<number, string> = {
   [CipherType.Login]: '登录',
@@ -15,10 +18,13 @@ const TYPE_LABEL: Record<number, string> = {
   [CipherType.SshKey]: 'SSH',
 };
 
-async function loadOrgKeys(): Promise<Map<string, Uint8Array>> {
-  const raw = (await orgKeysB64.getValue()) ?? {};
-  return new Map(Object.entries(raw).map(([id, b64]) => [id, fromB64(b64)]));
-}
+const TYPE_COLOR: Record<number, string> = {
+  [CipherType.Login]: 'bg-blue-100 text-blue-700',
+  [CipherType.SecureNote]: 'bg-gray-100 text-gray-600',
+  [CipherType.Card]: 'bg-emerald-100 text-emerald-700',
+  [CipherType.Identity]: 'bg-violet-100 text-violet-700',
+  [CipherType.SshKey]: 'bg-amber-100 text-amber-700',
+};
 
 /** 解密文件夹名（用户密钥），失败的文件夹静默跳过 */
 async function loadFolderNames(key: Uint8Array): Promise<Map<string, string>> {
@@ -34,45 +40,65 @@ async function loadFolderNames(key: Uint8Array): Promise<Map<string, string>> {
   return map;
 }
 
-export default function VaultView(props: { onLock: () => void }) {
+export default function VaultView(props: { onLock: () => void; onLogout: () => void }) {
   const [items, setItems] = useState<DecryptedCipher[]>([]);
   const [failed, setFailed] = useState<FailedCipher[]>([]);
   const [query, setQuery] = useState('');
-  const [selected, setSelected] = useState<DecryptedCipher | null>(null);
-  const [error, setError] = useState('');
   const [folders, setFolders] = useState<Map<string, string>>(new Map());
   const [folderFilter, setFolderFilter] = useState('');
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState('');
+  const [error, setError] = useState('');
+  // 路由：列表 / 详情 / 编辑（新建是 edit 无 item）
+  const [route, setRoute] = useState<
+    { name: 'list' } | { name: 'detail'; item: DecryptedCipher } | { name: 'edit'; item: DecryptedCipher | null }
+  >({ name: 'list' });
+
+  const reload = async () => {
+    const keyB64 = await userKeyB64.getValue();
+    const raw = (await vaultCiphersRaw.getValue()) ?? [];
+    if (!keyB64) {
+      props.onLock();
+      return;
+    }
+    const userKey = fromB64(keyB64);
+    const { ok, failed } = await decryptCiphers(
+      raw as CipherResponse[],
+      userKey,
+      await loadOrgKeys(),
+    );
+    setItems(ok);
+    setFailed(failed);
+    setFolders(await loadFolderNames(userKey));
+    await recordSyncStats(ok.length, failed);
+  };
 
   useEffect(() => {
-    (async () => {
-      try {
-        const keyB64 = await userKeyB64.getValue();
-        const raw = (await vaultCiphersRaw.getValue()) ?? [];
-        if (!keyB64) {
-          props.onLock();
-          return;
-        }
-        const userKey = fromB64(keyB64);
-        const { ok, failed } = await decryptCiphers(
-          raw as CipherResponse[],
-          userKey,
-          await loadOrgKeys(),
-        );
-        setItems(ok);
-        setFailed(failed);
-        setFolders(await loadFolderNames(userKey));
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-      }
-    })();
+    reload().catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
+
+  const doSync = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    setSyncMsg('');
+    try {
+      const r = await syncVault();
+      await reload();
+      setSyncMsg(`已同步 ${r.cipherCount} 条`);
+    } catch (e) {
+      setSyncMsg(e instanceof Error ? e.message : '同步失败');
+    } finally {
+      setSyncing(false);
+      setTimeout(() => setSyncMsg(''), 3000);
+    }
+  };
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const list = items.filter((i) => {
+      if (i.deletedDate) return false; // 回收站条目不进主列表
       if (folderFilter === '__none__' && i.folderId) return false;
-      if (folderFilter && folderFilter !== '__none__' && i.folderId !== folderFilter)
-        return false;
+      if (folderFilter && folderFilter !== '__none__' && i.folderId !== folderFilter) return false;
       if (!q) return true;
       return (
         i.name.toLowerCase().includes(q) ||
@@ -80,29 +106,75 @@ export default function VaultView(props: { onLock: () => void }) {
         i.uris.some((u) => u.toLowerCase().includes(q))
       );
     });
-    // 收藏优先，其次按名称
     return [...list].sort(
       (a, b) => Number(b.favorite) - Number(a.favorite) || a.name.localeCompare(b.name),
     );
   }, [items, query, folderFilter]);
 
-  if (selected) {
-    return <ItemDetail item={selected} folders={folders} onBack={() => setSelected(null)} />;
+  if (route.name === 'edit') {
+    return (
+      <EditView
+        item={route.item}
+        folders={folders}
+        onDone={async (changed) => {
+          setRoute({ name: 'list' });
+          if (changed) {
+            await doSync();
+          }
+        }}
+      />
+    );
+  }
+
+  if (route.name === 'detail') {
+    return (
+      <ItemDetail
+        item={route.item}
+        folders={folders}
+        onBack={() => setRoute({ name: 'list' })}
+        onEdit={() => setRoute({ name: 'edit', item: route.item })}
+        onTrash={async () => {
+          await trashCipher(route.item.id);
+          await doSync();
+          setRoute({ name: 'list' });
+        }}
+      />
+    );
   }
 
   return (
-    <div class="flex h-full flex-col">
-      <div class="border-b border-gray-200 p-2">
-        <input
-          type="search"
-          class="w-full rounded border border-gray-300 px-3 py-1.5"
-          placeholder={`搜索 ${items.length} 个条目…`}
-          value={query}
-          onInput={(e) => setQuery((e.target as HTMLInputElement).value)}
-        />
+    <div class="flex h-full flex-col bg-white">
+      {/* 搜索 + 操作区 */}
+      <div class="space-y-1.5 border-b border-gray-100 p-2.5">
+        <div class="flex gap-1.5">
+          <input
+            type="search"
+            class="min-w-0 flex-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
+            placeholder={`搜索 ${items.length} 个条目…`}
+            value={query}
+            // eslint-disable-next-line jsx-a11y/no-autofocus
+            autoFocus
+            onInput={(e) => setQuery((e.target as HTMLInputElement).value)}
+          />
+          <button
+            class="shrink-0 rounded-lg border border-gray-200 px-2.5 text-gray-500 transition hover:bg-gray-50 disabled:opacity-50"
+            title="同步"
+            disabled={syncing}
+            onClick={doSync}
+          >
+            <span class={syncing ? 'inline-block animate-spin' : ''}>↻</span>
+          </button>
+          <button
+            class="shrink-0 rounded-lg bg-blue-600 px-2.5 text-white transition hover:bg-blue-700"
+            title="新建条目"
+            onClick={() => setRoute({ name: 'edit', item: null })}
+          >
+            ＋
+          </button>
+        </div>
         {folders.size > 0 && (
           <select
-            class="mt-1.5 w-full rounded border border-gray-300 px-2 py-1 text-xs"
+            class="w-full rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-600"
             value={folderFilter}
             onChange={(e) => setFolderFilter((e.target as HTMLSelectElement).value)}
           >
@@ -115,34 +187,46 @@ export default function VaultView(props: { onLock: () => void }) {
             <option value="__none__">无文件夹</option>
           </select>
         )}
+        {syncMsg && <p class="text-xs text-gray-400">{syncMsg}</p>}
       </div>
 
+      {/* 列表 */}
       <div class="flex-1 overflow-y-auto">
-        {error && <p class="m-2 rounded bg-red-50 p-2 text-xs text-red-700">{error}</p>}
+        {error && <p class="m-2 rounded-lg bg-red-50 p-2 text-xs text-red-700">{error}</p>}
 
         {filtered.map((item) => (
           <button
             key={item.id}
-            class="flex w-full items-center gap-2 border-b border-gray-100 px-3 py-2 text-left hover:bg-gray-50"
-            onClick={() => setSelected(item)}
+            class="group flex w-full items-center gap-3 border-b border-gray-50 px-3 py-2.5 text-left transition hover:bg-blue-50/50"
+            onClick={() => setRoute({ name: 'detail', item })}
           >
-            <span class="w-10 shrink-0 rounded bg-gray-100 px-1 py-0.5 text-center text-[10px] text-gray-500">
-              {TYPE_LABEL[item.type] ?? `T${item.type}`}
+            <span
+              class={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${
+                TYPE_COLOR[item.type] ?? 'bg-gray-100 text-gray-600'
+              }`}
+            >
+              {item.name[0]?.toUpperCase() ?? '?'}
             </span>
             <span class="min-w-0 flex-1">
-              <span class="block truncate font-medium">{item.name}</span>
-              {item.username && (
-                <span class="block truncate text-xs text-gray-500">{item.username}</span>
-              )}
+              <span class="block truncate font-medium leading-tight">
+                {item.favorite && <span class="mr-1 text-amber-400">★</span>}
+                {item.name}
+              </span>
+              <span class="block truncate text-xs leading-tight text-gray-400">
+                {TYPE_LABEL[item.type] ?? `类型${item.type}`}
+                {item.username ? ` · ${item.username}` : ''}
+              </span>
             </span>
-            {item.favorite && <span class="text-amber-500">★</span>}
           </button>
         ))}
 
         {!error && filtered.length === 0 && (
-          <p class="p-4 text-center text-gray-400">
-            {items.length === 0 ? '保险库为空' : '无匹配条目'}
-          </p>
+          <div class="p-8 text-center text-gray-300">
+            <p class="text-3xl">🗝️</p>
+            <p class="mt-2 text-sm text-gray-400">
+              {items.length === 0 ? '保险库为空，点右上角 ＋ 新建' : '无匹配条目'}
+            </p>
+          </div>
         )}
       </div>
 
@@ -160,62 +244,180 @@ export default function VaultView(props: { onLock: () => void }) {
         </details>
       )}
 
-      <div class="border-t border-gray-200 p-2">
+      {/* 底部：同步时间 + 锁定 */}
+      <div class="flex items-center justify-between border-t border-gray-100 px-3 py-1.5 text-[11px] text-gray-400">
+        <LastSyncLabel />
         <button
-          class="w-full rounded border border-gray-300 px-3 py-1.5 hover:bg-gray-50"
-          onClick={props.onLock}
+          class="rounded px-2 py-0.5 text-gray-500 transition hover:bg-gray-100"
+          onClick={async () => {
+            await lock();
+            props.onLock();
+          }}
         >
-          锁定
+          🔒 锁定
         </button>
       </div>
     </div>
   );
 }
 
+function LastSyncLabel() {
+  const [label, setLabel] = useState('');
+  useEffect(() => {
+    lastSyncAt.getValue().then((t) => {
+      if (t) setLabel(`上次同步 ${new Date(t).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`);
+    });
+  }, []);
+  return <span>{label}</span>;
+}
+
+// ---------- 详情 ----------
+
 function ItemDetail(props: {
   item: DecryptedCipher;
   folders: Map<string, string>;
   onBack: () => void;
+  onEdit: () => void;
+  onTrash: () => Promise<void>;
 }) {
   const { item } = props;
+  const [confirmTrash, setConfirmTrash] = useState(false);
+  const [busy, setBusy] = useState(false);
   const folderName = item.folderId ? props.folders.get(item.folderId) : undefined;
+
+  const trash = async () => {
+    if (!confirmTrash) {
+      setConfirmTrash(true);
+      setTimeout(() => setConfirmTrash(false), 3000);
+      return;
+    }
+    setBusy(true);
+    await props.onTrash();
+  };
+
   return (
-    <div class="flex h-full flex-col">
-      <div class="border-b border-gray-200 p-2">
-        <button class="text-blue-600 hover:underline" onClick={props.onBack}>
+    <div class="flex h-full flex-col bg-white">
+      <div class="flex items-center justify-between border-b border-gray-100 px-3 py-2">
+        <button class="text-blue-600 transition hover:underline" onClick={props.onBack}>
           ← 返回
         </button>
+        <div class="flex gap-1.5">
+          <button
+            class="rounded-lg border border-gray-200 px-2.5 py-1 text-xs text-gray-600 transition hover:bg-gray-50"
+            onClick={props.onEdit}
+          >
+            编辑
+          </button>
+          <button
+            class={`rounded-lg border px-2.5 py-1 text-xs transition disabled:opacity-50 ${
+              confirmTrash
+                ? 'border-red-300 bg-red-50 text-red-600'
+                : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+            }`}
+            disabled={busy}
+            onClick={trash}
+          >
+            {busy ? '删除中…' : confirmTrash ? '确认删除？' : '删除'}
+          </button>
+        </div>
       </div>
-      <div class="flex-1 space-y-3 overflow-y-auto p-3">
-        <h2 class="text-base font-bold">{item.name}</h2>
+
+      <div class="flex-1 space-y-3.5 overflow-y-auto p-4">
+        <div class="flex items-center gap-3">
+          <span
+            class={`flex h-11 w-11 items-center justify-center rounded-full text-lg font-semibold ${
+              TYPE_COLOR[item.type] ?? 'bg-gray-100 text-gray-600'
+            }`}
+          >
+            {item.name[0]?.toUpperCase() ?? '?'}
+          </span>
+          <div>
+            <h2 class="text-base font-bold leading-tight">{item.name}</h2>
+            <p class="text-xs text-gray-400">
+              {TYPE_LABEL[item.type] ?? `类型${item.type}`}
+              {folderName ? ` · ${folderName}` : ''}
+              {item.deletedDate ? ' · 回收站' : ''}
+            </p>
+          </div>
+        </div>
 
         {item.username && <CopyRow label="用户名" value={item.username} />}
         {item.password && <CopyRow label="密码" value={item.password} secret />}
         {item.totp && <TotpRow secret={item.totp} />}
-        {folderName && <p class="text-xs text-gray-500">文件夹：{folderName}</p>}
-        {item.uris.map((u) => (
-          <div key={u}>
-            <p class="text-xs text-gray-500">网址</p>
-            <a
-              class="block truncate text-blue-600 hover:underline"
-              href={u}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {u}
-            </a>
-          </div>
-        ))}
-        {item.notes && (
-          <div>
-            <p class="text-xs text-gray-500">备注</p>
-            <p class="whitespace-pre-wrap rounded bg-gray-50 p-2">{item.notes}</p>
+
+        {item.card && (
+          <div class="space-y-3">
+            <SectionTitle>卡片</SectionTitle>
+            {item.card.cardholderName && <CopyRow label="持卡人" value={item.card.cardholderName} />}
+            {item.card.number && <CopyRow label="卡号" value={item.card.number} secret />}
+            {item.card.code && <CopyRow label="安全码" value={item.card.code} secret />}
+            {(item.card.expMonth || item.card.expYear) && (
+              <Field label="有效期" value={`${item.card.expMonth ?? ''}/${item.card.expYear ?? ''}`} />
+            )}
+            {item.card.brand && <Field label="品牌" value={item.card.brand} />}
           </div>
         )}
+
+        {item.identity && (
+          <div class="space-y-3">
+            <SectionTitle>身份</SectionTitle>
+            {(item.identity.firstName || item.identity.lastName) && (
+              <Field
+                label="姓名"
+                value={`${item.identity.firstName ?? ''} ${item.identity.lastName ?? ''}`.trim()}
+              />
+            )}
+            {item.identity.email && <CopyRow label="邮箱" value={item.identity.email} />}
+            {item.identity.phone && <CopyRow label="电话" value={item.identity.phone} />}
+            {item.identity.address1 && <Field label="地址" value={item.identity.address1} />}
+          </div>
+        )}
+
+        {item.uris.length > 0 && (
+          <div>
+            <SectionTitle>网址</SectionTitle>
+            {item.uris.map((u) => (
+              <a
+                key={u}
+                class="block truncate text-blue-600 hover:underline"
+                href={u}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {u}
+              </a>
+            ))}
+          </div>
+        )}
+
+        {item.notes && (
+          <div>
+            <SectionTitle>备注</SectionTitle>
+            <p class="whitespace-pre-wrap rounded-lg bg-gray-50 p-2.5 text-gray-700">{item.notes}</p>
+          </div>
+        )}
+
         {item.fields.map((f, i) => (
           <CopyRow key={i} label={f.name || '自定义字段'} value={f.value} secret={f.type === 1} />
         ))}
       </div>
+    </div>
+  );
+}
+
+function SectionTitle(props: { children: string }) {
+  return (
+    <p class="border-b border-gray-100 pb-1 text-xs font-medium uppercase tracking-wide text-gray-400">
+      {props.children}
+    </p>
+  );
+}
+
+function Field(props: { label: string; value: string }) {
+  return (
+    <div>
+      <p class="text-xs text-gray-500">{props.label}</p>
+      <p class="rounded-lg bg-gray-50 px-2 py-1">{props.value}</p>
     </div>
   );
 }
@@ -256,12 +458,14 @@ function TotpRow(props: { secret: string }) {
     <div>
       <p class="text-xs text-gray-500">验证码</p>
       <div class="flex items-center gap-2">
-        <code class="flex-1 rounded bg-gray-50 px-2 py-1 font-mono text-lg tracking-widest">
+        <code class="flex-1 rounded-lg bg-blue-50 px-2.5 py-1.5 font-mono text-lg tracking-[0.2em] text-blue-700">
           {code.slice(0, 3)} {code.slice(3)}
         </code>
-        <span class={`text-xs ${remain <= 5 ? 'text-red-600' : 'text-gray-400'}`}>{remain}s</span>
+        <span class={`text-xs tabular-nums ${remain <= 5 ? 'font-medium text-red-500' : 'text-gray-400'}`}>
+          {remain}s
+        </span>
         <button
-          class="shrink-0 rounded border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50"
+          class="shrink-0 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs transition hover:bg-gray-50"
           onClick={copy}
         >
           {copied ? '✓' : '复制'}
@@ -284,20 +488,20 @@ function CopyRow(props: { label: string; value: string; secret?: boolean }) {
   return (
     <div>
       <p class="text-xs text-gray-500">{props.label}</p>
-      <div class="flex items-center gap-1">
-        <span class="min-w-0 flex-1 truncate rounded bg-gray-50 px-2 py-1 font-mono">
+      <div class="flex items-center gap-1.5">
+        <span class="min-w-0 flex-1 truncate rounded-lg bg-gray-50 px-2.5 py-1.5 font-mono">
           {props.secret && !show ? '••••••••' : props.value}
         </span>
         {props.secret && (
           <button
-            class="shrink-0 rounded border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50"
+            class="shrink-0 rounded-lg border border-gray-200 px-2 py-1.5 text-xs transition hover:bg-gray-50"
             onClick={() => setShow(!show)}
           >
             {show ? '隐藏' : '显示'}
           </button>
         )}
         <button
-          class="shrink-0 rounded border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50"
+          class="shrink-0 rounded-lg border border-gray-200 px-2 py-1.5 text-xs transition hover:bg-gray-50"
           onClick={copy}
         >
           {copied ? '✓' : '复制'}

@@ -47,8 +47,7 @@ export class VaultwardenClient {
     return this.get('/api/config');
   }
 
-  async prelogin(email: string): Promise<PreloginResult> {
-    // 新端点优先；老版 Vaultwarden 没有 /prelogin/password，回退到老端点
+  async prelogin(email: string): Promise<PreloginResult> {    // 新端点优先；老版 Vaultwarden 没有 /prelogin/password，回退到老端点
     try {
       const res = await this.postJson<PasswordPreloginResponse>(
         '/identity/accounts/prelogin/password',
@@ -96,6 +95,37 @@ export class VaultwardenClient {
       throw new ApiError(res.status, extractErrorMessage(text, res.status));
     }
     return (await res.json()) as TokenResponse;
+  }
+
+  async refreshTokens(refreshToken: string): Promise<TokenResponse> {
+    const body = new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id: CLIENT_ID,
+      refresh_token: refreshToken,
+    });
+    const res = await fetch(`${this.baseUrl}/identity/connect/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new ApiError(res.status, extractErrorMessage(text, res.status));
+    }
+    return (await res.json()) as TokenResponse;
+  }
+
+  async putJson<T>(path: string, body: unknown): Promise<T> {
+    const res = await fetch(`${this.baseUrl}${path}`, {
+      method: 'PUT',
+      headers: { ...this.headers(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new ApiError(res.status, extractErrorMessage(text, res.status));
+    }
+    return (await res.json()) as T;
   }
 
   async get<T>(path: string): Promise<T> {

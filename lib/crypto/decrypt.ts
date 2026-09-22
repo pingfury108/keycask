@@ -13,9 +13,17 @@ export interface DecryptedCipher {
   notes?: string;
   favorite: boolean;
   folderId?: string | null;
+  organizationId?: string | null;
+  /** 卡片字段（type 3）：cardholderName/number/brand/expMonth/expYear/code */
+  card?: Record<string, string>;
+  /** 身份字段（type 4）：firstName/lastName/email/phone/address1 等 */
+  identity?: Record<string, string>;
   fields: { name: string; value: string; type: number }[];
   deletedDate?: string | null;
   unknownFields?: string[];
+  /** 原始密文字段，编辑回写时原样带回 */
+  rawFields?: unknown[];
+  rawPasswordHistory?: unknown[];
 }
 
 export interface FailedCipher {
@@ -93,8 +101,27 @@ async function decryptCipher(c: CipherResponse, key: Uint8Array): Promise<Decryp
     notes: await dec(c.notes, key),
     favorite: c.favorite ?? false,
     folderId: c.folderId,
+    organizationId: c.organizationId,
+    card: await decryptStringMap(c.card, key),
+    identity: await decryptStringMap(c.identity, key),
     fields,
     deletedDate: c.deletedDate,
     unknownFields: c._unknown ? Object.keys(c._unknown) : undefined,
+    rawFields: c.fields ?? [],
+    rawPasswordHistory: c.passwordHistory ?? [],
   };
+}
+
+/** Card/Identity：整个子对象的每个字段都是独立 EncString */
+async function decryptStringMap(
+  obj: Record<string, string | null> | null | undefined,
+  key: Uint8Array,
+): Promise<Record<string, string> | undefined> {
+  if (!obj) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    const plain = await dec(v, key);
+    if (plain) out[k] = plain;
+  }
+  return out;
 }

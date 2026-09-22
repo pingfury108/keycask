@@ -58,12 +58,24 @@ function normalizeCipher(raw: Record<string, unknown>): CipherResponse {
         }
       : null,
     secureNote: g(raw, 'SecureNote') ?? null,
-    card: g(raw, 'Card') ?? null,
-    identity: g(raw, 'Identity') ?? null,
+    card: camelizeKeys(g<Record<string, unknown>>(raw, 'Card')),
+    identity: camelizeKeys(g<Record<string, unknown>>(raw, 'Identity')),
     fields,
     passwordHistory: null, // M2 暂不解析
     _unknown: Object.keys(unknown).length ? unknown : undefined,
   };
+}
+
+/** 对象键统一转 camelCase（Card/Identity 等子对象内部也是 PascalCase） */
+function camelizeKeys(
+  obj: Record<string, unknown> | undefined,
+): Record<string, string | null> | null {
+  if (!obj) return null;
+  const out: Record<string, string | null> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    out[k[0]!.toLowerCase() + k.slice(1)] = v == null ? null : String(v);
+  }
+  return out;
 }
 
 /** 规范化整个 sync 响应（PascalCase/camelCase 双兼容 + 未知字段收编） */
