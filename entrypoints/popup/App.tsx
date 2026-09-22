@@ -43,8 +43,8 @@ export default function App() {
   if (view === 'loading') return null;
 
   return (
-    <div class="w-80 bg-gray-50 text-sm text-gray-900">
-      <header class="flex items-center justify-between bg-blue-700 px-4 py-2.5 text-white shadow-sm">
+    <div class="flex h-[600px] w-[380px] flex-col overflow-hidden bg-gray-50 text-sm text-gray-900">
+      <header class="flex shrink-0 items-center justify-between bg-blue-700 px-4 py-2.5 text-white shadow-sm">
         <h1 class="text-[15px] font-bold tracking-wide">钥匣 KeyCask</h1>
         {url && view !== 'setup' && (
           <button
@@ -58,31 +58,44 @@ export default function App() {
       </header>
 
       {view === 'setup' && (
-        <SetupView
-          initialUrl={url}
-          onDone={(u) => {
-            setUrl(u);
-            setView('login');
-          }}
-        />
+        <div class="min-h-0 flex-1 overflow-y-auto">
+          <SetupView
+            initialUrl={url}
+            onDone={(u) => {
+              setUrl(u);
+              setView('login');
+            }}
+          />
+        </div>
       )}
-      {view === 'login' && <LoginView baseUrl={url} onSuccess={() => setView('vault')} />}
-      {view === 'unlock' && <UnlockView onSuccess={() => setView('vault')} />}
+      {view === 'login' && (
+        <div class="min-h-0 flex-1 overflow-y-auto">
+          <LoginView baseUrl={url} onSuccess={() => setView('vault')} />
+        </div>
+      )}
+      {view === 'unlock' && (
+        <div class="min-h-0 flex-1 overflow-y-auto">
+          <UnlockView onSuccess={() => setView('vault')} />
+        </div>
+      )}
 
       {(view === 'vault' || view === 'generator') && (
-        <div class="flex h-[520px] flex-col">
-          <div class="min-h-0 flex-1">
+        <>
+          {/* 内容区只占剩余空间，内部自己滚动；TabBar 固定底部 */}
+          <div class="min-h-0 flex-1 overflow-hidden">
             {view === 'vault' ? (
               <VaultView
                 onLock={() => setView('unlock')}
                 onLogout={() => setView('login')}
               />
             ) : (
-              <GeneratorView />
+              <div class="h-full overflow-y-auto">
+                <GeneratorView />
+              </div>
             )}
           </div>
           <TabBar current={view} onChange={setView} />
-        </div>
+        </>
       )}
     </div>
   );
@@ -92,23 +105,22 @@ function TabBar(props: {
   current: 'vault' | 'generator';
   onChange: (v: 'vault' | 'generator') => void;
 }) {
-  const tab = (v: 'vault' | 'generator', icon: string, label: string) => (
+  const tab = (v: 'vault' | 'generator', label: string) => (
     <button
-      class={`flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px] transition ${
+      class={`flex-1 py-3 text-[13px] transition ${
         props.current === v
-          ? 'bg-blue-50 font-medium text-blue-700'
-          : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'
+          ? 'border-t-2 border-blue-600 font-medium text-blue-700'
+          : 'border-t-2 border-transparent text-gray-400 hover:text-gray-600'
       }`}
       onClick={() => props.onChange(v)}
     >
-      <span class="text-base leading-none">{icon}</span>
       {label}
     </button>
   );
   return (
-    <div class="flex border-t border-gray-200 bg-white">
-      {tab('vault', '🔐', '保险库')}
-      {tab('generator', '🎲', '生成器')}
+    <div class="flex shrink-0 border-t border-gray-200 bg-white">
+      {tab('vault', '保险库')}
+      {tab('generator', '生成器')}
     </div>
   );
 }

@@ -143,9 +143,9 @@ export default function VaultView(props: { onLock: () => void; onLogout: () => v
   }
 
   return (
-    <div class="flex h-full flex-col bg-white">
-      {/* 搜索 + 操作区 */}
-      <div class="space-y-1.5 border-b border-gray-100 p-2.5">
+    <div class="flex h-full flex-col overflow-hidden bg-white">
+      {/* 搜索 + 操作区（固定） */}
+      <div class="shrink-0 space-y-1.5 border-b border-gray-100 p-2.5">
         <div class="flex gap-1.5">
           <input
             type="search"
@@ -190,8 +190,8 @@ export default function VaultView(props: { onLock: () => void; onLogout: () => v
         {syncMsg && <p class="text-xs text-gray-400">{syncMsg}</p>}
       </div>
 
-      {/* 列表 */}
-      <div class="flex-1 overflow-y-auto">
+      {/* 列表：唯一滚动区 */}
+      <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         {error && <p class="m-2 rounded-lg bg-red-50 p-2 text-xs text-red-700">{error}</p>}
 
         {filtered.map((item) => (
@@ -230,9 +230,9 @@ export default function VaultView(props: { onLock: () => void; onLogout: () => v
         )}
       </div>
 
-      {/* 宽容解密：失败条目单独可见，绝不白屏 */}
+      {/* 宽容解密：失败条目单独可见，绝不白屏（固定，不随列表滚动） */}
       {failed.length > 0 && (
-        <details class="border-t border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
+        <details class="max-h-32 shrink-0 overflow-y-auto border-t border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
           <summary class="cursor-pointer">{failed.length} 条无法解密（点击查看原因）</summary>
           <ul class="mt-1 max-h-24 overflow-y-auto">
             {failed.map((f) => (
@@ -244,8 +244,8 @@ export default function VaultView(props: { onLock: () => void; onLogout: () => v
         </details>
       )}
 
-      {/* 底部：同步时间 + 锁定 */}
-      <div class="flex items-center justify-between border-t border-gray-100 px-3 py-1.5 text-[11px] text-gray-400">
+      {/* 底部状态栏（固定）：同步时间 + 锁定 */}
+      <div class="flex shrink-0 items-center justify-between border-t border-gray-100 px-3 py-2 text-[11px] text-gray-400">
         <LastSyncLabel />
         <button
           class="rounded px-2 py-0.5 text-gray-500 transition hover:bg-gray-100"
