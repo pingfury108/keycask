@@ -30,6 +30,10 @@ export const vaultCiphersRaw = storage.defineItem<unknown[] | null>('local:vault
   fallback: null,
 });
 
+export const vaultFoldersRaw = storage.defineItem<unknown[] | null>('local:vaultFolders', {
+  fallback: null,
+});
+
 export const lastSyncAt = storage.defineItem<number | null>('local:lastSyncAt', {
   fallback: null,
 });

@@ -2,6 +2,7 @@ import { deriveMasterKey, masterPasswordHash, parsePrelogin, stretchMasterKey } 
 import { decryptToBytes, parseEncString } from '@/lib/crypto/enc-string';
 import { toB64 } from '@/lib/crypto/encoding';
 import type { SyncResponse } from '@/lib/protocol/types';
+import { normalizeSyncResponse } from '@/lib/protocol/normalize';
 import { VaultwardenClient } from './client';
 import {
   accessToken,
@@ -9,6 +10,7 @@ import {
   lastSyncAt,
   userKeyB64,
   vaultCiphersRaw,
+  vaultFoldersRaw,
 } from '@/lib/store/settings';
 
 export interface LoginResult {
@@ -41,7 +43,8 @@ export async function loginAndSync(
   });
   client.withToken(token.access_token);
 
-  const sync = await client.get<SyncResponse>('/api/sync');
+  // 老版服务端响应是 PascalCase，统一归一化为 camelCase
+  const sync = normalizeSyncResponse(await client.get<Record<string, unknown>>('/api/sync'));
 
   // 解密 User Key：老版服务端在 token.Key（PascalCase），新版在 profile.key
   const encryptedUserKey = token.Key ?? token.key ?? sync.profile?.key;
@@ -53,6 +56,7 @@ export async function loginAndSync(
   await accessToken.setValue(token.access_token);
   await userKeyB64.setValue(toB64(userKey));
   await vaultCiphersRaw.setValue(sync.ciphers ?? []);
+  await vaultFoldersRaw.setValue(sync.folders ?? []);
   await lastSyncAt.setValue(Date.now());
 
   return {

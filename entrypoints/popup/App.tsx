@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'preact/hooks';
-import { serverUrl, userKeyB64, vaultCiphersRaw, lastEmail } from '@/lib/store/settings';
+import { serverUrl, userKeyB64, lastEmail } from '@/lib/store/settings';
 import { VaultwardenClient } from '@/lib/vaultwarden/client';
 import { loginAndSync } from '@/lib/vaultwarden/auth';
+import VaultView from './VaultView';
 
 type View = 'loading' | 'setup' | 'login' | 'vault';
 
@@ -45,7 +46,14 @@ export default function App() {
         />
       )}
       {view === 'login' && <LoginView baseUrl={url} onSuccess={() => setView('vault')} />}
-      {view === 'vault' && <VaultPlaceholder onLock={() => setView('login')} />}
+      {view === 'vault' && (
+        <VaultView
+          onLock={async () => {
+            await userKeyB64.setValue(null);
+            setView('login');
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -164,32 +172,3 @@ function LoginView(props: { baseUrl: string; onSuccess: () => void }) {
   );
 }
 
-// ---------- 保险库占位（M2 将替换为解密后的列表） ----------
-
-function VaultPlaceholder(props: { onLock: () => void }) {
-  const [count, setCount] = useState(0);
-
-  useEffect(() => {
-    vaultCiphersRaw.getValue().then((c) => setCount(c?.length ?? 0));
-  }, []);
-
-  const lock = async () => {
-    await userKeyB64.setValue(null);
-    props.onLock();
-  };
-
-  return (
-    <div class="p-4">
-      <p class="rounded bg-green-50 p-3 text-green-800">
-        登录成功，已同步 {count} 个条目（密文）。
-      </p>
-      <p class="mt-2 text-xs text-gray-500">条目列表将在 M2（宽容解密）接入。</p>
-      <button
-        class="mt-3 w-full rounded border border-gray-300 px-3 py-2 hover:bg-gray-50"
-        onClick={lock}
-      >
-        锁定
-      </button>
-    </div>
-  );
-}
