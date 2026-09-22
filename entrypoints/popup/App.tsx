@@ -45,7 +45,10 @@ export default function App() {
   return (
     <div class="flex h-full w-full flex-col overflow-hidden bg-gray-50 text-sm text-gray-900">
       <header class="flex shrink-0 items-center justify-between bg-blue-700 px-4 py-2.5 text-white shadow-sm">
-        <h1 class="text-[15px] font-bold tracking-wide">钥匣 KeyCask</h1>
+        <h1 class="flex items-center gap-2 text-[15px] font-bold tracking-wide">
+          <img src="/icons/icon-32.png" alt="" class="h-5 w-5 rounded" />
+          钥匣 KeyCask
+        </h1>
         {url && view !== 'setup' && (
           <button
             class="rounded px-1.5 py-0.5 text-[11px] text-blue-200 transition hover:bg-blue-600 hover:text-white"

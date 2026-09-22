@@ -11,6 +11,18 @@ export default defineConfig({
     name: '钥匣 KeyCask',
     description: 'Vaultwarden 兼容的密码管理器插件（宽容解密，抗版本错配）',
     permissions: ['storage', 'alarms', 'contextMenus', 'webNavigation'],
+    icons: {
+      16: 'icons/icon-16.png',
+      32: 'icons/icon-32.png',
+      48: 'icons/icon-48.png',
+      128: 'icons/icon-128.png',
+    },
+    action: {
+      default_icon: {
+        16: 'icons/icon-16.png',
+        32: 'icons/icon-32.png',
+      },
+    },
     // 自建服务器地址不可预知，需要全量 host 权限以绕过扩展页的 CORS 限制
     host_permissions: ['https://*/*', 'http://*/*'],
     // hash-wasm（Argon2id）需要在扩展页实例化 WASM

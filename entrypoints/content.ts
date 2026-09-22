@@ -147,7 +147,12 @@ const CSS = `
   .banner .ghost:hover { color: #fff; }
 `;
 
-const KEY_ICON = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="14" r="4"/><path d="M11 11l9-9"/><path d="M15 5l3 3"/><path d="M18 2l3 3"/></svg>`;
+/** 钥匙孔 logo（内联按钮用）：解锁蓝色 / 锁定灰色（复刻官方 logo / logoLocked 双态） */
+function keyholeIcon(color: string): string {
+  return `<svg width="16" height="16" viewBox="0 0 24 24" fill="${color}"><circle cx="12" cy="9.5" r="5.2"/><path d="M9.8 13.2h4.4l1.6 8.8H8.2z"/></svg>`;
+}
+const ICON_UNLOCKED = keyholeIcon('#2563eb');
+const ICON_LOCKED = keyholeIcon('#9ca3af');
 
 function shadowHost(id: string, css: string): { host: HTMLElement; shadow: ShadowRoot } {
   const host = document.createElement('div');
@@ -229,13 +234,13 @@ class InlineMenu {
       this.shadow!.querySelectorAll('.btn,.menu').forEach((n) => n.remove());
     }
 
-    // 字段右缘钥匙按钮（复刻官方 menu-button）
+    // 字段右缘钥匙按钮（复刻官方 menu-button；锁定态灰色）
     const btn = document.createElement('button');
     btn.className = 'btn';
     btn.type = 'button';
     btn.tabIndex = -1;
-    btn.title = '钥匣 KeyCask';
-    btn.innerHTML = KEY_ICON;
+    btn.title = this.locked ? '钥匣 KeyCask（已锁定）' : '钥匣 KeyCask';
+    btn.innerHTML = this.locked ? ICON_LOCKED : ICON_UNLOCKED;
     btn.addEventListener('mousedown', (e) => e.preventDefault()); // 不抢焦点
     btn.addEventListener('click', (e) => {
       e.preventDefault();
