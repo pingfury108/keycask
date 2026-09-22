@@ -9,7 +9,7 @@ export interface DecryptedCipher {
   username?: string;
   password?: string;
   totp?: string;
-  uris: string[];
+  uris: { uri: string; match?: number | null }[];
   notes?: string;
   favorite: boolean;
   folderId?: string | null;
@@ -73,11 +73,11 @@ export async function decryptCiphers(
 
 async function decryptCipher(c: CipherResponse, key: Uint8Array): Promise<DecryptedCipher> {
   // 注意：老版本 cipher.key 可能存在于条目级（条目密钥），M2 先按无条目密钥处理
-  const uris: string[] = [];
+  const uris: DecryptedCipher['uris'] = [];
   if (c.login?.uris) {
     for (const u of c.login.uris) {
       const uri = await dec(u.uri, key);
-      if (uri) uris.push(uri);
+      if (uri) uris.push({ uri, match: u.match });
     }
   }
 

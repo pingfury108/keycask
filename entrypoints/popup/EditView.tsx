@@ -14,7 +14,7 @@ export default function EditView(props: {
     name: existing?.name ?? '',
     username: existing?.username ?? '',
     password: existing?.password ?? '',
-    uri: existing?.uris[0] ?? '',
+    uri: existing?.uris[0]?.uri ?? '',
     notes: existing?.notes ?? '',
     totp: existing?.totp ?? '',
     folderId: existing?.folderId ?? null,

@@ -24,6 +24,15 @@ export function fieldKeywords(el: HTMLInputElement): string {
     .toLowerCase();
 }
 
+/** 递归收集所有 input（穿透 open shadow root；closed shadow 无解，官方也一样） */
+function collectInputs(root: ParentNode, out: HTMLInputElement[] = []): HTMLInputElement[] {
+  for (const el of root.querySelectorAll('input')) out.push(el);
+  for (const el of root.querySelectorAll('*')) {
+    if (el.shadowRoot) collectInputs(el.shadowRoot, out);
+  }
+  return out;
+}
+
 export function isVisible(el: HTMLElement): boolean {
   if (el.hidden || el.closest('[hidden],[aria-hidden="true"]')) return false;
   const style = getComputedStyle(el);
@@ -40,9 +49,9 @@ function isFillableText(el: HTMLInputElement): boolean {
   );
 }
 
-/** 在文档（或 shadow root）里找登录字段 */
+/** 在文档（含 open shadow root）里找登录字段 */
 export function findLoginFields(root: ParentNode = document): LoginFields {
-  const inputs = [...root.querySelectorAll('input')].filter((el) => isVisible(el));
+  const inputs = collectInputs(root).filter((el) => isVisible(el));
 
   // 密码框：排除注册/验证码场景
   const passwords = inputs.filter(

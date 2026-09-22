@@ -57,6 +57,11 @@ export const lockTimeoutMin = storage.defineItem<number>('local:lockTimeoutMin',
   fallback: 15,
 });
 
+/** 不再提示保存密码的域名（hostname 集合） */
+export const neverDomains = storage.defineItem<string[]>('local:neverDomains', {
+  fallback: [],
+});
+
 /** 最近一次活跃时间（popup 打开/操作时刷新） */
 export const lastActivity = storage.defineItem<number>('local:lastActivity', {
   fallback: 0,

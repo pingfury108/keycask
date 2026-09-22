@@ -99,17 +99,16 @@ export default function VaultView(props: { onLock: () => void; onLogout: () => v
   );
 
   const fillToTab = async (item: DecryptedCipher) => {
-    const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id) return;
-    try {
-      await browser.tabs.sendMessage(tab.id, {
-        type: 'keycask:fill',
-        item: { id: item.id, name: item.name, username: item.username, password: item.password },
-      });
+    // 经 background 转发到各 frame（iframe 表单也能填）
+    const filled: boolean = await browser.runtime.sendMessage({
+      type: 'keycask:fill',
+      item: { id: item.id, name: item.name, username: item.username, password: item.password, totp: item.totp },
+    });
+    if (filled) {
       window.close();
-    } catch {
+    } else {
       // 页面未加载 content script（扩展重载前的旧标签页）：提示刷新
-      setError('当前页面未加载填充脚本，请刷新页面后重试');
+      setError('当前页面未找到登录表单，请刷新页面后重试');
     }
   };
 
@@ -139,7 +138,7 @@ export default function VaultView(props: { onLock: () => void; onLogout: () => v
       return (
         i.name.toLowerCase().includes(q) ||
         i.username?.toLowerCase().includes(q) ||
-        i.uris.some((u) => u.toLowerCase().includes(q))
+        i.uris.some((u) => u.uri.toLowerCase().includes(q))
       );
     });
     return [...list].sort(
@@ -191,6 +190,10 @@ export default function VaultView(props: { onLock: () => void; onLogout: () => v
             // eslint-disable-next-line jsx-a11y/no-autofocus
             autoFocus
             onInput={(e) => setQuery((e.target as HTMLInputElement).value)}
+            onKeyDown={(e) => {
+              // Enter：无搜索词时直接填充当前网站第一个匹配（官方同款手势）
+              if (e.key === 'Enter' && !query && tabMatches[0]) void fillToTab(tabMatches[0]);
+            }}
           />
           <button
             class="shrink-0 rounded-lg border border-gray-200 px-2.5 text-gray-500 transition hover:bg-gray-50 disabled:opacity-50"
@@ -232,8 +235,9 @@ export default function VaultView(props: { onLock: () => void; onLogout: () => v
 
         {tabMatches.length > 0 && !query && (
           <>
-            <p class="bg-gray-50 px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-gray-400">
-              当前网站
+            <p class="flex items-center justify-between bg-gray-50 px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-gray-400">
+              <span>当前网站</span>
+              <span class="normal-case tracking-normal">⌘⇧L 快捷填充</span>
             </p>
             {tabMatches.map((item) => (
               <div
@@ -454,13 +458,13 @@ function ItemDetail(props: {
             <SectionTitle>网址</SectionTitle>
             {item.uris.map((u) => (
               <a
-                key={u}
+                key={u.uri}
                 class="block truncate text-blue-600 hover:underline"
-                href={u}
+                href={u.uri}
                 target="_blank"
                 rel="noreferrer"
               >
-                {u}
+                {u.uri}
               </a>
             ))}
           </div>

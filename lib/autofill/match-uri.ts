@@ -34,26 +34,55 @@ export function getRegistrableDomain(hostname: string): string {
   return last2;
 }
 
+/** 官方 UriMatchStrategy 枚举（条目级可覆盖默认 Domain） */
+export const enum UriMatchStrategy {
+  Domain = 0,
+  Host = 1,
+  StartsWith = 2,
+  Exact = 3,
+  RegularExpression = 4,
+  Never = 5,
+}
+
 /**
- * 条目是否匹配当前页面 URL（Domain 策略 + startsWith 兜底）。
+ * 单条 URI 是否匹配页面（strategy 缺省走 Domain）。
+ */
+export function uriMatch(
+  itemUri: string,
+  pageUrl: string,
+  strategy: UriMatchStrategy | null = null,
+): boolean {
+  if (!itemUri) return false;
+  const s = strategy ?? UriMatchStrategy.Domain;
+  if (s === UriMatchStrategy.Never) return false;
+
+  if (s === UriMatchStrategy.Exact) return itemUri.toLowerCase() === pageUrl.toLowerCase();
+  if (s === UriMatchStrategy.StartsWith)
+    return pageUrl.toLowerCase().startsWith(itemUri.toLowerCase());
+  if (s === UriMatchStrategy.RegularExpression) {
+    try {
+      return new RegExp(itemUri, 'i').test(pageUrl);
+    } catch {
+      return false; // 非法正则视为不匹配（官方同行为）
+    }
+  }
+
+  const pageHost = getHostname(pageUrl);
+  const itemHost = getHostname(itemUri);
+  if (!pageHost || !itemHost) return false;
+
+  if (s === UriMatchStrategy.Host) return itemHost === pageHost;
+  // Domain：可注册域名相同（含 host 全同）
+  return itemHost === pageHost || getRegistrableDomain(itemHost) === getRegistrableDomain(pageHost);
+}
+
+/**
+ * 条目是否匹配当前页面 URL（Domain 策略 + 条目级覆盖）。
  * 任一 URI 匹配即算命中。
  */
-export function uriMatches(itemUris: string[], pageUrl: string): boolean {
-  const pageHost = getHostname(pageUrl);
-  if (!pageHost) return false;
-  const pageDomain = getRegistrableDomain(pageHost);
-
-  for (const raw of itemUris) {
-    if (!raw) continue;
-    const itemHost = getHostname(raw);
-    if (!itemHost) {
-      // 无法解析的 URI：退化为主页 URL 前缀匹配
-      if (pageUrl.toLowerCase().startsWith(raw.toLowerCase())) return true;
-      continue;
-    }
-    // 完整 host 相同，或可注册域名相同
-    if (itemHost === pageHost) return true;
-    if (getRegistrableDomain(itemHost) === pageDomain) return true;
-  }
-  return false;
+export function uriMatches(
+  itemUris: { uri: string; match?: number | null }[],
+  pageUrl: string,
+): boolean {
+  return itemUris.some((u) => uriMatch(u.uri, pageUrl, u.match as UriMatchStrategy | null));
 }

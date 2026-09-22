@@ -43,7 +43,7 @@ export default function App() {
   if (view === 'loading') return null;
 
   return (
-    <div class="flex h-[600px] w-[380px] flex-col overflow-hidden bg-gray-50 text-sm text-gray-900">
+    <div class="flex h-full w-full flex-col overflow-hidden bg-gray-50 text-sm text-gray-900">
       <header class="flex shrink-0 items-center justify-between bg-blue-700 px-4 py-2.5 text-white shadow-sm">
         <h1 class="text-[15px] font-bold tracking-wide">钥匣 KeyCask</h1>
         {url && view !== 'setup' && (
