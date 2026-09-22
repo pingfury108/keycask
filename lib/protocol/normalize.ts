@@ -76,6 +76,11 @@ export function normalizeSyncResponse(raw: Record<string, unknown>): SyncRespons
       name: g<string>(profile, 'Name') ?? null,
       key: g<string>(profile, 'Key') ?? undefined,
       privateKey: g<string>(profile, 'PrivateKey') ?? undefined,
+      organizations: (g<Record<string, unknown>[]>(profile, 'Organizations') ?? []).map((o) => ({
+        id: g<string>(o, 'Id') ?? '',
+        name: g<string>(o, 'Name'),
+        key: g<string>(o, 'Key'),
+      })),
     },
     folders: (g<Record<string, unknown>[]>(raw, 'Folders') ?? []).map((f) => ({
       id: g<string>(f, 'Id') ?? '',

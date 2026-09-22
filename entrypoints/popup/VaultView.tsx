@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { fromB64 } from '@/lib/crypto/encoding';
 import { decryptCiphers, type DecryptedCipher, type FailedCipher } from '@/lib/crypto/decrypt';
-import { userKeyB64, vaultCiphersRaw } from '@/lib/store/settings';
+import { userKeyB64, orgKeysB64, vaultCiphersRaw } from '@/lib/store/settings';
 import type { CipherResponse } from '@/lib/protocol/types';
 import { CipherType } from '@/lib/protocol/types';
 
@@ -12,6 +12,11 @@ const TYPE_LABEL: Record<number, string> = {
   [CipherType.Identity]: '身份',
   [CipherType.SshKey]: 'SSH',
 };
+
+async function loadOrgKeys(): Promise<Map<string, Uint8Array>> {
+  const raw = (await orgKeysB64.getValue()) ?? {};
+  return new Map(Object.entries(raw).map(([id, b64]) => [id, fromB64(b64)]));
+}
 
 export default function VaultView(props: { onLock: () => void }) {
   const [items, setItems] = useState<DecryptedCipher[]>([]);
@@ -32,6 +37,7 @@ export default function VaultView(props: { onLock: () => void }) {
         const { ok, failed } = await decryptCiphers(
           raw as CipherResponse[],
           fromB64(keyB64),
+          await loadOrgKeys(),
         );
         setItems(ok);
         setFailed(failed);

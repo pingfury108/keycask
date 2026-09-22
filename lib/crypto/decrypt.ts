@@ -37,17 +37,25 @@ async function dec(s: string | null | undefined, key: Uint8Array): Promise<strin
 /**
  * 逐条宽容解密（本项目的核心差异化设计）：
  * 单条失败绝不拖垮整列——失败的进 failed 清单，UI 单独展示原因。
+ * 组织条目（organizationId）用对应的组织密钥解密。
  */
 export async function decryptCiphers(
   ciphers: CipherResponse[],
   key: Uint8Array,
+  orgKeys?: Map<string, Uint8Array>,
 ): Promise<DecryptAllResult> {
   const ok: DecryptedCipher[] = [];
   const failed: FailedCipher[] = [];
 
   for (const c of ciphers) {
     try {
-      ok.push(await decryptCipher(c, key));
+      let itemKey = key;
+      if (c.organizationId) {
+        const orgKey = orgKeys?.get(c.organizationId);
+        if (!orgKey) throw new Error('缺少该条目的组织密钥');
+        itemKey = orgKey;
+      }
+      ok.push(await decryptCipher(c, itemKey));
     } catch (e) {
       failed.push({ id: c.id, reason: e instanceof Error ? e.message : String(e) });
     }

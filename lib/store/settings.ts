@@ -25,6 +25,11 @@ export const userKeyB64 = storage.defineItem<string | null>('session:userKey', {
   fallback: null,
 });
 
+/** 组织密钥（orgId → 64B 密钥的 base64），仅会话期 */
+export const orgKeysB64 = storage.defineItem<Record<string, string> | null>('session:orgKeys', {
+  fallback: null,
+});
+
 /** 最近一次同步拿到的密文缓存（M2 起供 popup 直接读取渲染） */
 export const vaultCiphersRaw = storage.defineItem<unknown[] | null>('local:vaultCiphers', {
   fallback: null,

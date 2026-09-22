@@ -66,6 +66,8 @@ export interface TokenResponse {
    */
   Key?: string;
   key?: string;
+  /** RSA 私钥（EncString type 2，User Key 加密）；老版 token 响应为 PascalCase */
+  PrivateKey?: string;
   privateKey?: string;
   kdf?: KdfType;
   kdfIterations?: number;
@@ -93,7 +95,14 @@ export interface ProfileResponse {
   key?: string;
   privateKey?: string;
   premium?: boolean;
-  organizations?: unknown[];
+  organizations?: OrganizationMembership[];
+}
+
+/** 组织成员关系：key 是 RSA-OAEP-SHA1 加密的组织对称密钥（type 4） */
+export interface OrganizationMembership {
+  id: string;
+  name?: string;
+  key?: string;
 }
 
 export interface FolderResponse {
