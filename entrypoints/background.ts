@@ -16,6 +16,7 @@ import {
 } from '@/lib/vaultwarden/matches';
 import { createCipher } from '@/lib/vaultwarden/ciphers';
 import { VaultwardenClient } from '@/lib/vaultwarden/client';
+import { refreshAllBadges, watchBadge } from '@/lib/badge';
 
 const SYNC_ALARM = 'keycask-sync';
 const LOCK_ALARM = 'keycask-lock-check';
@@ -93,30 +94,12 @@ export default defineBackground(() => {
     }
   });
 
-  // 工具栏角标：当前标签页的匹配数
-  browser.tabs.onUpdated.addListener((tabId, info, tab) => {
-    if (info.status === 'complete' && tab.url) void updateBadge(tabId, tab.url);
-  });
-  browser.tabs.onActivated.addListener(async ({ tabId }) => {
-    const tab = await browser.tabs.get(tabId);
-    if (tab.url) void updateBadge(tabId, tab.url);
-  });
+  // 工具栏角标（tab 事件 + 存储变更驱动）
+  watchBadge();
+  void refreshAllBadges();
 
   watchMatchCache();
 });
-
-/** 更新角标：匹配数（0/锁定/无会话时清空） */
-async function updateBadge(tabId: number, url: string): Promise<void> {
-  if (!/^https?:/.test(url)) return;
-  try {
-    const { locked, items } = await getLoginMatches(url);
-    const text = locked || items.length === 0 ? '' : String(items.length);
-    await browser.action.setBadgeText({ tabId, text });
-    await browser.action.setBadgeBackgroundColor({ tabId, color: '#2563eb' });
-  } catch {
-    /* tab 可能已关闭 */
-  }
-}
 
 /** 填充活动标签页：依次尝试各 frame，第一个有表单的 frame 接住 */
 async function fillActiveTab(item: MatchItem): Promise<boolean> {
