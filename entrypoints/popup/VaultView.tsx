@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { fromB64 } from '@/lib/crypto/encoding';
 import { decryptCiphers, type DecryptedCipher, type FailedCipher } from '@/lib/crypto/decrypt';
-import { userKeyB64, orgKeysB64, vaultCiphersRaw } from '@/lib/store/settings';
-import type { CipherResponse } from '@/lib/protocol/types';
+import { userKeyB64, orgKeysB64, vaultCiphersRaw, vaultFoldersRaw } from '@/lib/store/settings';
+import type { CipherResponse, FolderResponse } from '@/lib/protocol/types';
 import { CipherType } from '@/lib/protocol/types';
+import { parseTotp, generateTotp } from '@/lib/crypto/totp';
+import { parseAndDecrypt } from '@/lib/crypto/enc-string';
 
 const TYPE_LABEL: Record<number, string> = {
   [CipherType.Login]: '登录',
@@ -18,12 +20,28 @@ async function loadOrgKeys(): Promise<Map<string, Uint8Array>> {
   return new Map(Object.entries(raw).map(([id, b64]) => [id, fromB64(b64)]));
 }
 
+/** 解密文件夹名（用户密钥），失败的文件夹静默跳过 */
+async function loadFolderNames(key: Uint8Array): Promise<Map<string, string>> {
+  const raw = ((await vaultFoldersRaw.getValue()) ?? []) as FolderResponse[];
+  const map = new Map<string, string>();
+  for (const f of raw) {
+    try {
+      map.set(f.id, await parseAndDecrypt(f.name, key));
+    } catch {
+      /* 单个文件夹失败不影响 */
+    }
+  }
+  return map;
+}
+
 export default function VaultView(props: { onLock: () => void }) {
   const [items, setItems] = useState<DecryptedCipher[]>([]);
   const [failed, setFailed] = useState<FailedCipher[]>([]);
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<DecryptedCipher | null>(null);
   const [error, setError] = useState('');
+  const [folders, setFolders] = useState<Map<string, string>>(new Map());
+  const [folderFilter, setFolderFilter] = useState('');
 
   useEffect(() => {
     (async () => {
@@ -34,13 +52,15 @@ export default function VaultView(props: { onLock: () => void }) {
           props.onLock();
           return;
         }
+        const userKey = fromB64(keyB64);
         const { ok, failed } = await decryptCiphers(
           raw as CipherResponse[],
-          fromB64(keyB64),
+          userKey,
           await loadOrgKeys(),
         );
         setItems(ok);
         setFailed(failed);
+        setFolders(await loadFolderNames(userKey));
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
@@ -49,26 +69,29 @@ export default function VaultView(props: { onLock: () => void }) {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const list = q
-      ? items.filter(
-          (i) =>
-            i.name.toLowerCase().includes(q) ||
-            i.username?.toLowerCase().includes(q) ||
-            i.uris.some((u) => u.toLowerCase().includes(q)),
-        )
-      : items;
+    const list = items.filter((i) => {
+      if (folderFilter === '__none__' && i.folderId) return false;
+      if (folderFilter && folderFilter !== '__none__' && i.folderId !== folderFilter)
+        return false;
+      if (!q) return true;
+      return (
+        i.name.toLowerCase().includes(q) ||
+        i.username?.toLowerCase().includes(q) ||
+        i.uris.some((u) => u.toLowerCase().includes(q))
+      );
+    });
     // 收藏优先，其次按名称
     return [...list].sort(
       (a, b) => Number(b.favorite) - Number(a.favorite) || a.name.localeCompare(b.name),
     );
-  }, [items, query]);
+  }, [items, query, folderFilter]);
 
   if (selected) {
-    return <ItemDetail item={selected} onBack={() => setSelected(null)} />;
+    return <ItemDetail item={selected} folders={folders} onBack={() => setSelected(null)} />;
   }
 
   return (
-    <div class="flex h-[480px] flex-col">
+    <div class="flex h-full flex-col">
       <div class="border-b border-gray-200 p-2">
         <input
           type="search"
@@ -77,6 +100,21 @@ export default function VaultView(props: { onLock: () => void }) {
           value={query}
           onInput={(e) => setQuery((e.target as HTMLInputElement).value)}
         />
+        {folders.size > 0 && (
+          <select
+            class="mt-1.5 w-full rounded border border-gray-300 px-2 py-1 text-xs"
+            value={folderFilter}
+            onChange={(e) => setFolderFilter((e.target as HTMLSelectElement).value)}
+          >
+            <option value="">全部文件夹</option>
+            {[...folders.entries()].map(([id, name]) => (
+              <option key={id} value={id}>
+                {name}
+              </option>
+            ))}
+            <option value="__none__">无文件夹</option>
+          </select>
+        )}
       </div>
 
       <div class="flex-1 overflow-y-auto">
@@ -134,10 +172,15 @@ export default function VaultView(props: { onLock: () => void }) {
   );
 }
 
-function ItemDetail(props: { item: DecryptedCipher; onBack: () => void }) {
+function ItemDetail(props: {
+  item: DecryptedCipher;
+  folders: Map<string, string>;
+  onBack: () => void;
+}) {
   const { item } = props;
+  const folderName = item.folderId ? props.folders.get(item.folderId) : undefined;
   return (
-    <div class="flex h-[480px] flex-col">
+    <div class="flex h-full flex-col">
       <div class="border-b border-gray-200 p-2">
         <button class="text-blue-600 hover:underline" onClick={props.onBack}>
           ← 返回
@@ -148,7 +191,8 @@ function ItemDetail(props: { item: DecryptedCipher; onBack: () => void }) {
 
         {item.username && <CopyRow label="用户名" value={item.username} />}
         {item.password && <CopyRow label="密码" value={item.password} secret />}
-        {item.totp && <CopyRow label="TOTP 密钥" value={item.totp} secret />}
+        {item.totp && <TotpRow secret={item.totp} />}
+        {folderName && <p class="text-xs text-gray-500">文件夹：{folderName}</p>}
         {item.uris.map((u) => (
           <div key={u}>
             <p class="text-xs text-gray-500">网址</p>
@@ -171,6 +215,57 @@ function ItemDetail(props: { item: DecryptedCipher; onBack: () => void }) {
         {item.fields.map((f, i) => (
           <CopyRow key={i} label={f.name || '自定义字段'} value={f.value} secret={f.type === 1} />
         ))}
+      </div>
+    </div>
+  );
+}
+
+/** TOTP 实时验证码：每秒刷新，显示剩余秒数，点复制拿当前码 */
+function TotpRow(props: { secret: string }) {
+  const [code, setCode] = useState('');
+  const [remain, setRemain] = useState(30);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let params: ReturnType<typeof parseTotp>;
+    try {
+      params = parseTotp(props.secret);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    const tick = async () => {
+      setCode(await generateTotp(params));
+      setRemain(params.period - (Math.floor(Date.now() / 1000) % params.period));
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [props.secret]);
+
+  if (error) return <p class="text-xs text-red-600">TOTP 解析失败：{error}</p>;
+
+  const copy = async () => {
+    await navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <div>
+      <p class="text-xs text-gray-500">验证码</p>
+      <div class="flex items-center gap-2">
+        <code class="flex-1 rounded bg-gray-50 px-2 py-1 font-mono text-lg tracking-widest">
+          {code.slice(0, 3)} {code.slice(3)}
+        </code>
+        <span class={`text-xs ${remain <= 5 ? 'text-red-600' : 'text-gray-400'}`}>{remain}s</span>
+        <button
+          class="shrink-0 rounded border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50"
+          onClick={copy}
+        >
+          {copied ? '✓' : '复制'}
+        </button>
       </div>
     </div>
   );

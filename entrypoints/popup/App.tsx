@@ -3,8 +3,23 @@ import { serverUrl, userKeyB64, lastEmail } from '@/lib/store/settings';
 import { VaultwardenClient } from '@/lib/vaultwarden/client';
 import { loginAndSync } from '@/lib/vaultwarden/auth';
 import VaultView from './VaultView';
+import GeneratorView from './GeneratorView';
 
-type View = 'loading' | 'setup' | 'login' | 'vault';
+type View = 'loading' | 'setup' | 'login' | 'vault' | 'generator';
+
+function TabBar(props: { current: 'vault' | 'generator'; onChange: (v: 'vault' | 'generator') => void }) {
+  const tab = (v: 'vault' | 'generator', label: string) => (
+    <button
+      class={`flex-1 py-1.5 text-xs ${
+        props.current === v ? 'bg-blue-50 font-medium text-blue-700' : 'text-gray-500 hover:bg-gray-50'
+      }`}
+      onClick={() => props.onChange(v)}
+    >
+      {label}
+    </button>
+  );
+  return <div class="flex border-t border-gray-200">{tab('vault', '保险库')}{tab('generator', '生成器')}</div>;
+}
 
 export default function App() {
   const [view, setView] = useState<View>('loading');
@@ -46,13 +61,22 @@ export default function App() {
         />
       )}
       {view === 'login' && <LoginView baseUrl={url} onSuccess={() => setView('vault')} />}
-      {view === 'vault' && (
-        <VaultView
-          onLock={async () => {
-            await userKeyB64.setValue(null);
-            setView('login');
-          }}
-        />
+      {(view === 'vault' || view === 'generator') && (
+        <div class="flex h-[480px] flex-col">
+          <div class="min-h-0 flex-1">
+            {view === 'vault' ? (
+              <VaultView
+                onLock={async () => {
+                  await userKeyB64.setValue(null);
+                  setView('login');
+                }}
+              />
+            ) : (
+              <GeneratorView />
+            )}
+          </div>
+          <TabBar current={view} onChange={setView} />
+        </div>
       )}
     </div>
   );
